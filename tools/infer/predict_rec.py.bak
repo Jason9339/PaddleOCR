@@ -47,7 +47,6 @@ class TextRecognizer(object):
             "name": "CTCLabelDecode",
             "character_dict_path": args.rec_char_dict_path,
             "use_space_char": args.use_space_char,
-            "merge_repeated": False if "SVTR" in args.rec_algorithm else True  # 根據算法動態設置
         }
         if self.rec_algorithm == "SRN":
             postprocess_params = {
@@ -542,19 +541,13 @@ class TextRecognizer(object):
 
     def __call__(self, img_list):
         img_num = len(img_list)
-        # logger.debug(f"Number of images to process: {img_num}")
         # Calculate the aspect ratio of all text bars
         width_list = []
         for img in img_list:
-            if img is None:
-                logger.error("Found None in img_list")
-                continue
-            # logger.debug(f"Image shape: {img.shape}")
             width_list.append(img.shape[1] / float(img.shape[0]))
         # Sorting can speed up the recognition process
         indices = np.argsort(np.array(width_list))
-        # 初始化為包含基本信息的字典列表
-        rec_res = [{"text": "", "score": 0.0, "char_details": []}] * img_num
+        rec_res = [["", 0.0]] * img_num
         batch_num = self.rec_batch_num
         st = time.time()
         if self.benchmark:
@@ -806,36 +799,15 @@ class TextRecognizer(object):
                         self.autolog.times.stamp()
                     if len(outputs) != 1:
                         preds = outputs
-                        # logger.debug(f"Model output shape: {preds.shape}")
                     else:
                         preds = outputs[0]
-                        # logger.debug(f"Model output shape: {preds.shape}")
-            ##########
             if self.postprocess_params["name"] == "CTCLabelDecode":
-                text_list, detail_list = self.postprocess_op(
+                rec_result = self.postprocess_op(
                     preds,
                     return_word_box=self.return_word_box,
                     wh_ratio_list=wh_ratio_list,
                     max_wh_ratio=max_wh_ratio,
                 )
-                rec_result = []
-                for text, details in zip(text_list, detail_list):
-                    if isinstance(text, list):
-                        text_score = text
-                    else:
-                        if details:
-                            top1_scores = [char["top3"][0]["score"] for char in details]
-                            weights = [1.0 if i == 0 else 0.5 for i in range(len(details))]
-                            weighted_score = np.sum([s * w for s, w in zip(top1_scores, weights)]) / sum(weights)
-                            text_score = [text, float(weighted_score)]
-                        else:
-                            text_score = [text, 0.0]
-                    rec_item = {
-                        "text": text_score[0],
-                        "score": text_score[1],
-                        "char_details": details
-                    }
-                    rec_result.append(rec_item)
             elif self.postprocess_params["name"] == "LaTeXOCRDecode":
                 preds = [p.reshape([-1]) for p in preds]
                 rec_result = self.postprocess_op(preds)

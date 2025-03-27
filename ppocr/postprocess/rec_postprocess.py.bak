@@ -18,9 +18,7 @@ import paddle
 from paddle.nn import functional as F
 import re
 import json
-from ppocr.utils.logging import get_logger
 
-logger = get_logger()
 
 class BaseRecLabelDecode(object):
     """Convert between text-label and text-index"""
@@ -197,159 +195,32 @@ class BaseRecLabelDecode(object):
 class CTCLabelDecode(BaseRecLabelDecode):
     """Convert between text-label and text-index"""
 
-    def __init__(self, character_dict_path=None, use_space_char=False, merge_repeated=True, **kwargs):
+    def __init__(self, character_dict_path=None, use_space_char=False, **kwargs):
         super(CTCLabelDecode, self).__init__(character_dict_path, use_space_char)
-        self.merge_repeated = merge_repeated  # 控制是否合併重複字符
-
-    def add_special_char(self, dict_character):
-        dict_character = ["blank"] + dict_character
-        return dict_character
-
-    def get_ignored_tokens(self):
-        return [0]  # 假設空白字符的索引為 0
-
-    def decode(self, preds_idx, prob_matrix=None, is_remove_duplicate=False, return_word_box=False):
-        """Convert probabilities to text and top-3 candidates."""
-        # 獲取空白字符索引
-        blank_idx = 0  # 因為空白字符在 add_special_char 中被添加到開頭
-        ignored_tokens = self.get_ignored_tokens()
-
-        # 存儲解碼結果
-        result_list = []
-        detail_list = []  # 存儲每個樣本的詳細結果（包括 Top-3 候選字）
-
-        for idx, pred in enumerate(preds_idx):
-            # 獲取當前樣本的概率矩陣（如果提供了 prob_matrix）
-            prob = prob_matrix[idx] if prob_matrix is not None else None
-            if prob is not None and len(prob.shape) != 2:
-                logger.error(f"prob_matrix[{idx}] must be 2D array with shape [sequence_length, num_classes], but got shape {prob.shape}")
-                prob = None
-
-            # 記錄有效字符及其時間步位置
-            char_positions = []
-            last_char_idx = -1
-            last_was_blank = False
-
-            # 識別有效字符位置
-            for t, char_idx in enumerate(pred):
-                if char_idx in ignored_tokens:
-                    continue
-                if char_idx == blank_idx:
-                    last_was_blank = True
-                    continue
-                # 如果需要合併重複字符，且當前字符與上一個字符相同，且中間沒有空白字符，則跳過
-                if self.merge_repeated and char_idx == last_char_idx and not last_was_blank:
-                    continue
-                last_char_idx = char_idx
-                last_was_blank = False
-                char_positions.append((t, char_idx))  # 記錄時間步和字符索引
-
-            # 構建文本和字符詳情
-            batch_text = []
-            char_details = []
-            char_boxes = []
-
-            for position_idx, (time_step, char_idx) in enumerate(char_positions):
-                # 添加到最終文本
-                char = self.character[char_idx]
-                batch_text.append(char)
-
-                # 如果需要返回字符框（word box），記錄字符位置
-                if return_word_box:
-                    char_boxes.append(time_step)
-
-                # 如果提供了概率矩陣，計算 Top-3 候選字
-                if prob is not None:
-                    probs = prob[time_step]  # 形狀應為 [num_classes]
-                    if not isinstance(probs, (np.ndarray, paddle.Tensor)) or len(probs.shape) != 1:
-                        logger.error(f"probs at time_step {time_step} must be 1D array with shape [num_classes], but got {probs}")
-                        continue
-
-                    # 找出前 3 高的字符索引（排除空白和忽略的標記）
-                    valid_indices = []
-                    valid_probs = []
-
-                    # 使用 topk 提取前 k 個概率最高的索引
-                    topk_probs, topk_indices = paddle.topk(paddle.to_tensor(probs), k=len(probs))
-                    topk_probs = topk_probs.numpy()
-                    topk_indices = topk_indices.numpy()
-
-                    for prob_val, idx in zip(topk_probs, topk_indices):
-                        if idx != blank_idx and idx not in ignored_tokens:
-                            valid_indices.append(idx)
-                            valid_probs.append(float(prob_val))
-                            if len(valid_indices) >= 3:  # 只取前 3 個
-                                break
-
-                    # 構建該字符的 Top-3 候選字
-                    top3 = []
-                    for i, (idx, prob_val) in enumerate(zip(valid_indices, valid_probs)):
-                        top3.append({
-                            "char": self.character[idx],
-                            "score": prob_val
-                        })
-
-                    # 添加到字符詳情列表
-                    char_details.append({
-                        "char": char,
-                        "position": position_idx,  # 在最終文本中的位置
-                        "time_step": time_step,    # 原始時間步位置
-                        "top3": top3
-                    })
-
-            # 構建最終文本
-            text = ''.join(batch_text)
-
-            # 根據 return_word_box 返回結果
-            if return_word_box:
-                result_list.append([text, char_details, char_boxes])
-            else:
-                result_list.append([text, char_details])
-
-        return result_list
 
     def __call__(self, preds, label=None, return_word_box=False, *args, **kwargs):
         if isinstance(preds, tuple) or isinstance(preds, list):
             preds = preds[-1]
         if isinstance(preds, paddle.Tensor):
             preds = preds.numpy()
-
-        if len(preds.shape) != 3:
-            logger.error(f"preds must be 3D array with shape [batch_size, sequence_length, num_classes], but got shape {preds.shape}")
-            return [], []
-
-        # 提取 Top-1 索引和完整的概率分佈
-        preds_idx = preds.argmax(axis=2)  # 形狀為 [batch_size, sequence_length]
-        prob_matrix = preds  # 形狀為 [batch_size, sequence_length, num_classes]
-
-        # 調用 decode 方法，傳入是否合併重複字符的參數
+        preds_idx = preds.argmax(axis=2)
+        preds_prob = preds.max(axis=2)
         text = self.decode(
             preds_idx,
-            prob_matrix,  # 傳遞完整的概率分佈
-            is_remove_duplicate=self.merge_repeated,
+            preds_prob,
+            is_remove_duplicate=True,
             return_word_box=return_word_box,
         )
-
-        # 處理 word box 的比例調整（如果需要）
         if return_word_box:
             for rec_idx, rec in enumerate(text):
                 wh_ratio = kwargs["wh_ratio_list"][rec_idx]
                 max_wh_ratio = kwargs["max_wh_ratio"]
                 rec[2][0] = rec[2][0] * (wh_ratio / max_wh_ratio)
-
-        # 分離 text 和 char_details
-        text_list = []
-        detail_list = []
-        for rec in text:
-            text_list.append(rec[0])  # 提取文本
-            detail_list.append(rec[1])  # 提取字符詳情
-
         if label is None:
-            return text_list, detail_list
-
+            return text
         label = self.decode(label)
-        return (text_list, detail_list), label
-    
+        return text, label
+
     def add_special_char(self, dict_character):
         dict_character = ["blank"] + dict_character
         return dict_character
