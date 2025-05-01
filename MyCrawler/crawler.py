@@ -27,7 +27,7 @@ processed_ids = set()
 max_items = 100  # 設定最大項目數
 
 # 創建下載目錄
-download_dir = "downloaded_images"
+download_dir = "../downloaded_images"
 if not os.path.exists(download_dir):
     os.makedirs(download_dir)
 
