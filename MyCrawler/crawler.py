@@ -18,16 +18,17 @@ options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Apple
 driver = webdriver.Chrome(options=options)
 
 # 從搜尋頁面開始
-search_url = "https://contentdm.lib.nccu.edu.tw/digital/collection/lclma/search"
+# search_url = "https://contentdm.lib.nccu.edu.tw/digital/collection/lclma/search"
+search_url = "https://contentdm.lib.nccu.edu.tw/digital/collection/lclma/search/page/2"
 driver.get(search_url)
 print("Opened search page, waiting for it to load...")
 
 # 追蹤已處理的ID，避免重複
 processed_ids = set()
-max_items = 100  # 設定最大項目數
+max_items = 5000  # 設定最大項目數
 
 # 創建下載目錄
-download_dir = "../downloaded_images"
+download_dir = "../../downloaded_images"
 if not os.path.exists(download_dir):
     os.makedirs(download_dir)
 
@@ -412,7 +413,7 @@ try:
 
             # 翻頁後等待頁面載入
             print("Waiting for next record to load...")
-            time.sleep(5)  # 增加等待時間至 5 秒
+            time.sleep(10)  # 增加等待時間至 5 秒
             scroll_page()  # 模擬滾動，觸發可能的 JavaScript 事件
             try:
                 WebDriverWait(driver, 15).until(
